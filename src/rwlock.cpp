@@ -9,26 +9,46 @@
 namespace dv::rwlock {
 
     void RWLock::readLock() {
-        if (rCount_.fetch_add(1, std::memory_order_relaxed) == 0) {
-            wLock_.lock();
-        }
+        std::unique_lock<std::mutex> lock(lock_);
+        cond_.wait(lock, [this] { return !(waitingWriters_ > 0 || isWriting_); });
+        ++activeReaders_;
     }
     
     void RWLock::readUnlock() {
-        if (rCount_.fetch_sub(1, std::memory_order_relaxed) == 1) {
-            wLock_.unlock();
-            wLocked_.notify_one();
+        bool notify = false;
+        {
+            std::unique_lock<std::mutex> lock(lock_);
+            if (activeReaders_ == 0) {
+                throw std::runtime_error("readUnlock called without readLock");
+            }
+            --activeReaders_;
+            if (activeReaders_ == 0) {
+                notify = true;
+            }
+        }
+        if (notify) {
+            cond_.notify_all();
         }
     }
 
 
     void RWLock::writeLock() {
-        std::unique_lock<std::mutex> lock(wLock_);
-        wLocked_.wait(lock, [this] { return rCount_ == 0; });
+        std::unique_lock<std::mutex> lock(lock_);
+        ++waitingWriters_;
+        cond_.wait(lock, [this] { return !(activeReaders_ > 0 || isWriting_); });
+        --waitingWriters_;
+        isWriting_ = true;
     }
 
     void RWLock::writeUnlock() {
-        wLock_.unlock();
+        {
+            std::unique_lock<std::mutex> lock(lock_);
+            if (!isWriting_) {
+                throw std::runtime_error("writeUnlock called without writeLock");
+            }
+            isWriting_ = false;
+        }
+        cond_.notify_all();
     }
 
 } // namespace dv::rwlock

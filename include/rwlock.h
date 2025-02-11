@@ -7,13 +7,15 @@
 
 #include <mutex>
 #include <condition_variable>
-#include <atomic>
+#include <cstdint>
 
 namespace dv::rwlock {
     class RWLock {
-        std::mutex wLock_;
-        std::condition_variable wLocked_;
-        std::atomic_uint32_t rCount_ = 0;
+        std::mutex lock_;
+        std::condition_variable cond_;
+        size_t activeReaders_ = 0;
+        size_t waitingWriters_ = 0;
+        bool isWriting_ = false;
     public:
         RWLock() = default;
         ~RWLock() = default;
